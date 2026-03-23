@@ -978,7 +978,7 @@ async def cpa_main_loop(args):
             else:
                 print(f"[{ts()}] [INFO] 仓库存量充足，无需补发。")
             
-            print(f"[{ts()}] [INFO] 维护周期结束，10 分钟后进行下一次巡检...")
+            print(f"[{ts()}] [INFO] 维护周期结束，{CHECK_INTERVAL_MINUTES} 分钟后进行下一次巡检...")
             await asyncio.sleep(CHECK_INTERVAL_MINUTES * 60)
 
         except Exception as e:
