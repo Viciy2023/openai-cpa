@@ -473,11 +473,23 @@ def _handle_dead_account(name: str, is_disabled: bool) -> None:
 
 def handle_registration_result(result: Any, cpa_upload: bool = False) -> str:
     global run_stats
-    last_email = mail_service.LAST_ATTEMPT_EMAIL
+
+    last_email = mail_service.get_last_email()
     cur_dom = last_email.split("@")[-1] if last_email and "@" in last_email else None
 
-    if not result or result[0] is None:
-        run_stats["failed"] += 1
+    token_json_str = None
+    password = None
+    if result and isinstance(result, (tuple, list)) and len(result) >= 2:
+        token_json_str, password = result
+
+    if not token_json_str or token_json_str == "retry_403":
+        if token_json_str == "retry_403":
+            run_stats["retries"] += 1
+            print(f"[{ts()}] [WARNING] 检测到 403 频率限制，挂起重试...")
+            ret_status = "retry_403"
+        else:
+            run_stats["failed"] += 1
+            ret_status = "failed"
 
         if cfg.ENABLE_SUB_DOMAINS and cur_dom:
             with _heal_lock:
@@ -486,22 +498,16 @@ def handle_registration_result(result: Any, cpa_upload: bool = False) -> str:
 
             if fails >= cfg.SUB_DOMAIN_FAIL_THRESHOLD:
                 auto_heal_subdomain(cur_dom)
-                with _heal_lock: sub_fail_counts[cur_dom] = 0 
+                with _heal_lock: 
+                    sub_fail_counts[cur_dom] = 0 
             else:
                 print(f"[{ts()}] [DEBUG] 域名 {mask_email(cur_dom)} 失败计数 ({fails}/{cfg.SUB_DOMAIN_FAIL_THRESHOLD})")
-        return "failed"
+
+        return ret_status
 
     if cur_dom:
-        with _heal_lock: sub_fail_counts[cur_dom] = 0
-
-    token_json_str, password = result
-    if not token_json_str:
-        run_stats["failed"] += 1
-        return "failed"
-    if token_json_str == "retry_403":
-        run_stats["retries"] += 1
-        print(f"[{ts()}] [WARNING] 检测到 403 频率限制，挂起重试...")
-        return "retry_403"
+        with _heal_lock: 
+            sub_fail_counts[cur_dom] = 0
 
     run_stats["success"] += 1
     token_data    = json.loads(token_json_str)
