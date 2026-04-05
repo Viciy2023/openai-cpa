@@ -14,7 +14,6 @@ CONFIG_FILE_LOCK = threading.Lock()
 def ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
-
 def format_docker_url(url: str) -> str:
     if not url or not isinstance(url, str):
         return url
@@ -23,28 +22,58 @@ def format_docker_url(url: str) -> str:
         url = url.replace("localhost", "host.docker.internal")
     return url
 
+def deep_update_config(default_dict, user_dict):
+    """
+    递归检查配置文件
+    """
+    updated = False
+    for key, value in default_dict.items():
+        if key not in user_dict:
+            user_dict[key] = value
+            updated = True
+        elif isinstance(value, dict) and isinstance(user_dict[key], dict):
+            if deep_update_config(value, user_dict[key]):
+                updated = True
+    return updated
 
 def init_config():
-    config_path = "config.yaml"
+    # 配置文件路径放到data 目录下
+    config_dir = "data"
+    config_path = os.path.join(config_dir, "config.yaml")
     template_path = "config.example.yaml"
+    os.makedirs(config_dir, exist_ok=True)
     if not os.path.exists(config_path):
         if os.path.exists(template_path):
             print(f"[{ts()}] [系统] 未检测到 {config_path}，正在从模板自动生成...")
             try:
-                import shutil
                 shutil.copyfile(template_path, config_path)
                 print(f"[{ts()}] [SUCCESS] 配置文件初始化成功！程序已加载默认配置。")
+            except PermissionError:
+                print(f"[{ts()}] [ERROR] 权限不足，无法在 {config_dir} 目录创建配置。请检查 Docker 目录权限。")
+                exit(1)
             except Exception as e:
                 print(f"[{ts()}] [ERROR] 自动生成配置文件失败: {e}")
                 exit(1)
         else:
-            print(f"[{ts()}] [ERROR] 配置文件 {config_path} 不存在，且未找到模板文件 {template_path}！")
-            print(f"[{ts()}] [ERROR] 请确保项目目录完整。")
+            print(f"[{ts()}] [ERROR] 缺少核心模板文件 {template_path}，无法启动！")
             exit(1)
 
-    # 正常读取配置
     with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        user_config = yaml.safe_load(f) or {}
+    if os.path.exists(template_path):
+        with open(template_path, "r", encoding="utf-8") as f:
+            default_config = yaml.safe_load(f) or {}
+
+        if deep_update_config(default_config, user_config):
+            print(f"[{ts()}] [系统] 🛠️ 检测到旧版配置缺失新参数，已自动补齐并生效！")
+            try:
+                with CONFIG_FILE_LOCK:
+                    with open(config_path, "w", encoding="utf-8") as f:
+                        yaml.dump(user_config, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+            except Exception as e:
+                print(f"[{ts()}] [WARNING] 自动补全配置文件写入失败: {e}")
+
+    return user_config
 
 _c: dict = {}
 ENABLE_SUB_DOMAINS: bool = False
