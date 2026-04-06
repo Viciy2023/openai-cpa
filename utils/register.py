@@ -13,38 +13,10 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 from curl_cffi import requests
-from utils.sentinel import get_token, clear_cache
 from utils import config as cfg
 from utils.mail_service import get_email_and_token, get_oai_code, mask_email
 from utils.hero_sms import _try_verify_phone_via_hero_sms
-from playwright.sync_api import BrowserType
-
-_original_launch = BrowserType.launch
-
-def _patched_launch(self, *args, **kwargs):
-    proxy_cfg = kwargs.get("proxy")
-    if proxy_cfg and isinstance(proxy_cfg, dict):
-        server = proxy_cfg.get("server", "")
-        if "@" in server:
-            parsed = urllib.parse.urlparse(server)
-            new_proxy = {
-                "server": f"http://{parsed.hostname}:{parsed.port}"
-            }
-            if parsed.username and parsed.password:
-                new_proxy["username"] = urllib.parse.unquote(parsed.username)
-                new_proxy["password"] = urllib.parse.unquote(parsed.password)
-
-            kwargs["proxy"] = new_proxy
-
-    args_list = kwargs.get("args", [])
-    if "--disable-dev-shm-usage" not in args_list:
-        args_list.append("--disable-dev-shm-usage")
-    kwargs["args"] = args_list
-
-    return _original_launch(self, *args, **kwargs)
-
-BrowserType.launch = _patched_launch
-
+from utils.auth_core import generate_payload
 
 AUTH_URL             = "https://auth.openai.com/oauth/authorize"
 TOKEN_URL            = "https://auth.openai.com/oauth/token"
@@ -407,7 +379,6 @@ def run(proxy: Optional[str]) -> tuple:
     if proxy and proxy.startswith("socks5://"):
         proxy = proxy.replace("socks5://", "socks5h://")
     proxies = {"http": proxy, "https": proxy} if proxy else None
-    clear_cache()
     s_reg = requests.Session(proxies=proxies, impersonate="chrome110")
     s_reg.timeout = 30
 
@@ -443,8 +414,8 @@ def run(proxy: Optional[str]) -> tuple:
             print(f"[{cfg.ts()}] [WARNING] 未获取到 oai-did，节点环境可能被关注。")
 
         print(f"[{cfg.ts()}] [INFO] 正在计算风控算力挑战...")
-
-        sentinel_signup = get_token(s_reg, "authorize_continue", proxies)
+        current_ua = s_reg.headers.get("User-Agent")
+        sentinel_signup = generate_payload(did=did, flow="authorize_continue", proxy=proxy,user_agent=current_ua,impersonate="chrome110")
         signup_headers = _oai_headers(did, {
             "Referer":               "https://auth.openai.com/create-account",
             "content-type":          "application/json",
@@ -466,7 +437,7 @@ def run(proxy: Optional[str]) -> tuple:
         if signup_resp.status_code != 200:
             print(f"[{cfg.ts()}] [ERROR] 提交邮箱环节异常, 返回: {signup_resp.text}")
             return None, None
-        sentinel_reg = get_token(s_reg, "username_password_create", proxies, use=True)
+        sentinel_reg = generate_payload(did=did, flow="username_password_create", proxy=proxy, user_agent=current_ua, impersonate="chrome110")
         pwd_headers = _oai_headers(did, {
             "Referer":               "https://auth.openai.com/create-account/password",
             "content-type":          "application/json",
@@ -552,7 +523,7 @@ def run(proxy: Optional[str]) -> tuple:
                 print(f"[{cfg.ts()}] [ERROR] 重试次数上限，丢弃当前 {mask_email(email)} 邮箱。")
                 return None, None
 
-            sentinel_otp = get_token(s_reg, "authorize_continue", proxies)
+            sentinel_otp = generate_payload(did=did, flow="authorize_continue", proxy=proxy, user_agent=current_ua, impersonate="chrome110")
             val_headers = _oai_headers(did, {
                 "Referer":               "https://auth.openai.com/email-verification",
                 "content-type":          "application/json",
@@ -574,7 +545,7 @@ def run(proxy: Optional[str]) -> tuple:
         print(f"[{cfg.ts()}] [INFO] 初始化账户信息 "
               f"(昵称: {user_info['name']}, 生日: {user_info['birthdate']})...")
 
-        sentinel_create = get_token(s_reg, "create_account", proxies, use=True)
+        sentinel_create = generate_payload(did=did, flow="create_account", proxy=proxy, user_agent=current_ua, impersonate="chrome110")
         create_headers = _oai_headers(did, {
             "Referer":      "https://auth.openai.com/about-you",
             "content-type": "application/json",
@@ -628,7 +599,7 @@ def run(proxy: Optional[str]) -> tuple:
                 proxies        = proxies,
             ), password
 
-        sentinel_log = get_token(s_log, "authorize_continue", proxies)
+        sentinel_log = generate_payload(did=did, flow="authorize_continue", proxy=proxy, user_agent=current_ua, impersonate="chrome110")
         log_start_headers = _oai_headers(s_log.cookies.get("oai-did") or "", {
             "Referer":               current_url,
             "content-type":          "application/json",
@@ -655,7 +626,7 @@ def run(proxy: Optional[str]) -> tuple:
         resp, current_url = _follow_redirect_chain_local(s_log, pwd_page_url, proxies)
 
 
-        sentinel_pwd = get_token(s_log, "password_verify", proxies)
+        sentinel_pwd = generate_payload(did=did, flow="password_verify", proxy=proxy, user_agent=current_ua, impersonate="chrome110")
         login_pwd_headers = _oai_headers(s_log.cookies.get("oai-did") or "", {
             "Referer":               current_url,
             "content-type":          "application/json",
@@ -718,8 +689,7 @@ def run(proxy: Optional[str]) -> tuple:
             if not code2:
                 print(f"[{cfg.ts()}] [ERROR] 重新发送后依然未收到验证码，彻底放弃。")
                 return None, None
-
-            sentinel_otp2 = get_token(s_log, "authorize_continue", proxies)
+            sentinel_otp2 = generate_payload(did=did, flow="authorize_continue", proxy=proxy, user_agent=current_ua, impersonate="chrome110")
             val2_headers = _oai_headers(s_log.cookies.get("oai-did") or "", {
                 "Referer":               current_url,
                 "content-type":          "application/json",
