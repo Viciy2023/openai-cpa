@@ -3,7 +3,7 @@ const { createApp } = Vue;
 createApp({
     data() {
         return {
-            appVersion: 'v9.0.1',
+            appVersion: 'v9.0.2',
             isLoggedIn: !!localStorage.getItem('auth_token'),
             loginPassword: '',
             currentTab: window.location.hash.replace('#', '') || 'console',
@@ -603,13 +603,21 @@ createApp({
 		initSSE() {
             if (this.evtSource) {
                 this.evtSource.close();
+                this.evtSource = null;
             }
             if (this.logFlushTimer) {
                 clearInterval(this.logFlushTimer);
+                this.logFlushTimer = null;
+            }
+            if (this.sseReconnectTimer) {
+                clearTimeout(this.sseReconnectTimer);
+                this.sseReconnectTimer = null;
             }
 
             const token = localStorage.getItem('auth_token');
-            const url = `/api/logs/stream?token=${token}`;
+            if (!token) return;
+            const timestamp = new Date().getTime();
+            const url = `/api/logs/stream?token=${token}&_t=${timestamp}`;
 
             this.evtSource = new EventSource(url);
             this.logFlushTimer = setInterval(() => {
@@ -620,11 +628,14 @@ createApp({
                     if (container) {
                         isScrolledToBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 50;
                     }
+
                     this.logs.push(...this.logBuffer);
                     this.logBuffer = [];
+
                     if (this.logs.length > 500) {
                         this.logs.splice(0, this.logs.length - 500);
                     }
+
                     this.$nextTick(() => {
                         if (container && (isScrolledToBottom || this.logs.length < 50)) {
                             container.scrollTop = container.scrollHeight;
@@ -653,16 +664,17 @@ createApp({
                 }
                 this.logBuffer.push(logObj);
             };
-
             this.evtSource.onerror = (event) => {
-                console.error("SSE 连接异常，浏览器将自动尝试重连...", event);
-                if (!this.isLoggedIn) {
+                console.error("🔴 SSE 连接断开或异常。");
+                if (this.evtSource) {
                     this.evtSource.close();
+                    this.evtSource = null;
                 }
+
                 if (this.isLoggedIn) {
                     console.log("⏳ 准备在 3 秒后强制重新建立日志通道...");
-                    setTimeout(() => {
-                        this.initSSE(); // 手动重新调用自己，建立全新的连接
+                    this.sseReconnectTimer = setTimeout(() => {
+                        this.initSSE();
                     }, 3000);
                 }
             };

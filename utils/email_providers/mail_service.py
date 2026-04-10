@@ -1064,7 +1064,7 @@ def get_oai_code(
             if "timeout" in str(e).lower() or "time out" in str(e).lower():
                 print(f"[{cfg.ts()}] [ERROR] 代理节点严重超时，终止本次邮箱查询。")
                 return ""
-            print(f"[{cfg.ts()}] [CRITICAL ERROR] 邮件循环发生异常: {str(e)}")
+            print(f"[{cfg.ts()}] [ERROR] 邮件循环发生异常: {str(e)}")
             import traceback
             traceback.print_exc()
 

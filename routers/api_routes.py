@@ -699,12 +699,22 @@ async def stream_logs(request: Request, token: str = Query(None)):
     async def log_generator():
         last_idx = len(log_history)
         for old_msg in log_history: yield f"data: {old_msg}\n\n"
+
+        idle_loops = 0
+
         try:
             while True:
                 if await request.is_disconnected(): break
                 if len(log_history) > last_idx:
-                    for i in range(last_idx, len(log_history)): yield f"data: {log_history[i]}\n\n"
+                    for i in range(last_idx, len(log_history)):
+                        yield f"data: {log_history[i]}\n\n"
                     last_idx = len(log_history)
+                    idle_loops = 0
+                else:
+                    idle_loops += 1
+                    if idle_loops >= 50:
+                        yield ": keepalive\n\n"
+                        idle_loops = 0
                 await asyncio.sleep(0.3)
         except asyncio.CancelledError:
             pass
